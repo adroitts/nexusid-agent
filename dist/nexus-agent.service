@@ -1,0 +1,26 @@
+[Unit]
+Description=NexusID hybrid sync agent (AD/DB)
+Documentation=https://docs.nexusid.ai/iga/sync-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nexus-agent
+Group=nexus-agent
+# Secrets live in an environment file (0600), not in the unit:
+#   NEXUS_AGENT_KEY=<base64-32>   (for enc: secrets)
+#   NEXUS_AGENT_TOKEN=...         SECRET_ENCRYPTION_KEY=...   etc.
+EnvironmentFile=/etc/nexus-agent/agent.env
+ExecStart=/usr/local/bin/nexus-agent run --config /etc/nexus-agent/config.toml
+Restart=on-failure
+RestartSec=10
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nexus-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

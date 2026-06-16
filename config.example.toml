@@ -1,0 +1,50 @@
+# NexusID hybrid sync agent — example configuration.
+#
+# Secrets accept three forms:
+#   env:VAR_NAME       read from an environment variable
+#   enc:<serialized>   vault-encrypted (run: nexus-agent encrypt-secret --value '...')  [needs NEXUS_AGENT_KEY]
+#   <literal>          plaintext (discouraged)
+
+[agent]
+id = "nexus-agent-dc01"     # unique per install; appears in heartbeats + audit log
+mode = "ad"                 # "ad" or "db"
+poll_interval_secs = 30
+audit_log = "/var/lib/nexus-agent/audit.jsonl"
+
+[server]
+base_url = "https://idp.example.com"
+agent_token = "env:NEXUS_AGENT_TOKEN"          # matches the broker's ad.agent.token
+secret_key  = "env:SECRET_ENCRYPTION_KEY"      # base64 32-byte key the broker encrypts passwords with
+verify_tls  = true
+
+# ───────────────────────── AD mode ─────────────────────────
+[ad]
+url = "ldaps://dc01.corp.example.com:636"
+bind_dn = "CN=svc-nexus,OU=Service Accounts,DC=corp,DC=example,DC=com"
+bind_password = "enc:AES-256-GCM|local|...."   # AD service-account password
+base_dn = "DC=corp,DC=example,DC=com"
+use_kerberos = false          # true requires a build with --features kerberos
+password_writeback = true     # set unicodePwd over LDAPS on create
+
+# ───────────────────────── DB mode ─────────────────────────
+# (set agent.mode = "db" to use this instead)
+[db]
+url = "enc:AES-256-GCM|local|...."   # e.g. postgres://user:pass@host:5432/hr
+driver = "postgres"                  # postgres | mysql | sqlite
+table = "employees"
+key_column = "employee_id"
+push_path = "/api/hr-sync/db-agent/webhook"
+push_secret = "env:DB_AGENT_WEBHOOK_SECRET"
+writeback = false                                  # apply server-side changes back to the DB
+# writeback_pull_path = "/api/hr-sync/db-agent/changes"
+
+# db_column = canonical_field (cast non-text columns to text in the column name if needed)
+[db.fields]
+employee_id = "employeeId"
+email = "primaryEmail"
+first_name = "firstName"
+last_name = "lastName"
+department = "department"
+title = "jobTitle"
+start_date = "startDate"
+termination_date = "terminationDate"

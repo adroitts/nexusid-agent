@@ -1,0 +1,4 @@
+/target
+*.log
+nexus-agent.audit.jsonl
+config.local.toml

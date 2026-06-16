@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd daemon. Install at /Library/LaunchDaemons/com.nexusid.agent.plist then:
+     sudo launchctl load -w /Library/LaunchDaemons/com.nexusid.agent.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nexusid.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/nexus-agent</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>/etc/nexus-agent/config.toml</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Prefer a secrets manager; these are placeholders. -->
+        <key>NEXUS_AGENT_KEY</key>
+        <string>__BASE64_32_BYTE_KEY__</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/nexus-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/nexus-agent.err</string>
+</dict>
+</plist>
