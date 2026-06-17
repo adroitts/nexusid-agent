@@ -1,0 +1,152 @@
+name: release
+
+# Cross-platform build + Azure Trusted Signing (Cybrium) + GitHub Release.
+# Trigger: push a tag like v0.1.0. Requires repo secrets AZURE_TENANT_ID / AZURE_CLIENT_ID /
+# AZURE_CLIENT_SECRET (the cybrium-agent-signer SP with the Artifact Signing signer role).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,  asset: linux-x86_64 }
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-musl, asset: linux-x86_64-musl }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,    asset: windows-x86_64 }
+          - { os: windows-latest, target: i686-pc-windows-msvc,      asset: windows-x86 }
+          - { os: macos-latest,   target: aarch64-apple-darwin,      asset: macos-arm64 }
+          - { os: macos-latest,   target: x86_64-apple-darwin,       asset: macos-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        shell: bash
+        run: |
+          rustup update stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # Authenticode-sign the Windows .exe with Azure Trusted Signing (Cybrium) before zipping.
+      - name: Azure Trusted Signing
+        if: runner.os == 'Windows'
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: https://cus.codesigning.azure.net/
+          trusted-signing-account-name: cybrium-signing
+          certificate-profile-name: cybrium
+          files-folder: target/${{ matrix.target }}/release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"
+          OUT="nexus-agent-${VER}-${{ matrix.asset }}"
+          mkdir stage
+          cp "target/${{ matrix.target }}/release/nexus-agent" stage/
+          cp README.md config.example.toml stage/
+          cp -r dist stage/ || true
+          tar -C stage -czf "${OUT}.tar.gz" .
+          shasum -a 256 "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = "${env:GITHUB_REF_NAME}"
+          $out = "nexus-agent-$ver-${{ matrix.asset }}"
+          New-Item -ItemType Directory stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/nexus-agent.exe" stage/
+          Copy-Item README.md, config.example.toml stage/
+          Compress-Archive -Path stage/* -DestinationPath "$out.zip" -Force
+          (Get-FileHash "$out.zip" -Algorithm SHA256).Hash | Out-File -Encoding ascii "$out.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.asset }}
+          path: |
+            nexus-agent-*.tar.gz
+            nexus-agent-*.tar.gz.sha256
+            nexus-agent-*.zip
+            nexus-agent-*.zip.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Fill package manifests + install scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"          # v0.1.0
+          SEMVER="${VER#v}"                 # 0.1.0
+          SHA_X64="$(awk '{print $1}' dist/agent-windows-x86_64/nexus-agent-${VER}-windows-x86_64.zip.sha256)"
+          SHA_X86="$(awk '{print $1}' dist/agent-windows-x86/nexus-agent-${VER}-windows-x86.zip.sha256)"
+          mkdir -p out/chocolatey/tools out/winget
+          fill() { sed -e "s/__VERSION__/${SEMVER}/g" -e "s/__SHA256_X64__/${SHA_X64}/g" -e "s/__SHA256_X86__/${SHA_X86}/g" "$1" > "$2"; }
+          fill packaging/chocolatey/nexus-agent.nuspec            out/chocolatey/nexus-agent.nuspec
+          fill packaging/chocolatey/tools/chocolateyInstall.ps1   out/chocolatey/tools/chocolateyInstall.ps1
+          cp   packaging/chocolatey/tools/chocolateyUninstall.ps1 out/chocolatey/tools/
+          fill packaging/winget/NexusID.Agent.yaml                out/winget/NexusID.Agent.yaml
+          fill packaging/winget/NexusID.Agent.installer.yaml      out/winget/NexusID.Agent.installer.yaml
+          fill packaging/winget/NexusID.Agent.locale.en-US.yaml   out/winget/NexusID.Agent.locale.en-US.yaml
+          cp   packaging/install.ps1 packaging/install.sh out/
+          ( cd out && zip -qr "nexus-agent-choco-${VER}.zip" chocolatey && zip -qr "nexus-agent-winget-${VER}.zip" winget )
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: NexusID Sync Agent ${{ github.ref_name }}
+          body: |
+            Cross-platform hybrid AD/DB sync agent — Linux (glibc + static musl), Windows (x64 + x86, Authenticode-signed via Azure Trusted Signing), macOS (Apple Silicon + Intel).
+
+            ### Install
+            **Windows (irm):**
+            ```powershell
+            irm https://raw.githubusercontent.com/adroitts/nexusid-agent/main/packaging/install.ps1 | iex
+            ```
+            **Windows:** `choco install nexus-agent` · `winget install NexusID.Agent`
+            **Linux / macOS:**
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/adroitts/nexusid-agent/main/packaging/install.sh | sh
+            ```
+            Verify any download against its `.sha256`. Chocolatey + Winget manifests attached.
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.tar.gz.sha256
+            dist/**/*.zip
+            dist/**/*.zip.sha256
+            out/install.ps1
+            out/install.sh
+            out/*.zip
