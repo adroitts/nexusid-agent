@@ -40,6 +40,15 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # Authenticate so the Trusted Signing dlib's DefaultAzureCredential has a working source
+      # (it picks up this az session via AzureCliCredential; env-var EnvironmentCredential alone
+      # was not honored by the action).
+      - name: Azure login
+        if: runner.os == 'Windows'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       # Authenticode-sign the Windows .exe with Azure Trusted Signing (Cybrium) before zipping.
       - name: Azure Trusted Signing
         if: runner.os == 'Windows'
