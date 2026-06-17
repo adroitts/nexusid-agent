@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Templated: __VERSION__ / __SHA256_X64__ / __SHA256_X86__ are filled in by the release pipeline. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>nexus-agent</id>
+    <version>__VERSION__</version>
+    <title>NexusID Sync Agent</title>
+    <authors>Adroitts</authors>
+    <owners>Adroitts</owners>
+    <projectUrl>https://github.com/adroitts/nexusid-agent</projectUrl>
+    <packageSourceUrl>https://github.com/adroitts/nexusid-agent/tree/main/packaging/chocolatey</packageSourceUrl>
+    <docsUrl>https://docs.nexusid.ai/iga/sync-agent</docsUrl>
+    <licenseUrl>https://github.com/adroitts/nexusid-agent</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <tags>nexusid identity active-directory ldap sync agent cli</tags>
+    <summary>NexusID hybrid sync agent — AD/LDAP and database connector for the NexusID broker.</summary>
+    <description>
+Cross-platform sync agent that connects egress to the NexusID broker and synchronizes Active
+Directory (LDAP/Kerberos/password writeback) or a database (bi-directional field sync), with
+encrypted credentials and a tamper-evident local event log. Installs the signed `nexus-agent` CLI.
+    </description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

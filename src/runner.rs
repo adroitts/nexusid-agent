@@ -36,31 +36,49 @@ pub async fn run(config: Config) -> Result<()> {
         config.agent.poll_interval_secs
     );
 
+    // Own the signal future in a dedicated task so the runtime polls it continuously (independent of
+    // the main loop's select timing); it notifies us via a oneshot. This reliably catches SIGTERM/
+    // SIGINT arriving at any point — including mid-sync — and lets us disconnect gracefully.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(());
+    });
+    tokio::pin!(shutdown_rx);
     loop {
-        // Register/refresh in the broker registry so the agent shows ONLINE in the console.
-        server
-            .heartbeat(config.agent.mode.as_str(), &hostname, version, directory_id.as_deref())
-            .await;
-
-        match run_pass(&config, &server, &cipher, &mut audit).await {
-            Ok(()) => {}
-            Err(e) => {
-                tracing::error!("sync pass failed: {e}");
-                let _ = audit.append("RUN_ERROR", serde_json::json!({ "error": e.to_string() }));
-            }
-        }
-
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(config.agent.poll_interval_secs)) => {}
-            _ = shutdown_signal() => {
-                tracing::info!("shutdown signal received; stopping");
-                server.disconnect("agent shutdown").await;
-                let _ = audit.append("RUN_STOP", serde_json::json!({ "mode": config.agent.mode.as_str() }));
-                break;
-            }
+            biased;
+            _ = &mut shutdown_rx => break,
+            _ = run_cycle(&config, &server, &cipher, &hostname, version, directory_id.as_deref(), &mut audit) => {}
         }
     }
+    // Only reachable via the shutdown branch; the work future is dropped here, freeing &mut audit.
+    tracing::info!("shutdown signal received; stopping");
+    server.disconnect("agent shutdown").await;
+    let _ = audit.append("RUN_STOP", serde_json::json!({ "mode": config.agent.mode.as_str() }));
     Ok(())
+}
+
+/// One full cycle: register a heartbeat, run a sync pass, then idle for the poll interval. Cancellable
+/// at any await point — the runner drops it on shutdown.
+async fn run_cycle(
+    config: &Config,
+    server: &ServerClient,
+    cipher: &crate::crypto::Cipher,
+    hostname: &str,
+    version: &str,
+    directory_id: Option<&str>,
+    audit: &mut AuditLog,
+) {
+    // Register/refresh in the broker registry so the agent shows ONLINE in the console.
+    server.heartbeat(config.agent.mode.as_str(), hostname, version, directory_id).await;
+
+    if let Err(e) = run_pass(config, server, cipher, audit).await {
+        tracing::error!("sync pass failed: {e}");
+        let _ = audit.append("RUN_ERROR", serde_json::json!({ "error": e.to_string() }));
+    }
+
+    tokio::time::sleep(Duration::from_secs(config.agent.poll_interval_secs)).await;
 }
 
 async fn run_pass(

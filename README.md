@@ -27,6 +27,14 @@ Both modes hold credentials encrypted and append every action to a hash-chained 
   event ‖ detail ‖ prev_hash)`). `nexus-agent verify-log` re-walks the chain and reports the record
   count and any break — so the on-box run history can't be silently edited.
 
+## Releases
+
+Prebuilt, signed-by-checksum binaries are published to
+[GitHub Releases](https://github.com/adroitts/nexusid-agent/releases) for Linux (glibc + static
+musl), Windows, and macOS (Apple Silicon + Intel). They're built by the Azure pipeline
+(`azure-pipelines-agent.yml`) on each `agent-v*` tag — a matrix across hosted Linux/Windows/macOS
+images that packages each target (+ `.sha256`) and attaches them to the release.
+
 ## Build
 
 ```bash

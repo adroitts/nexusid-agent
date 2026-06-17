@@ -1,0 +1,21 @@
+PackageIdentifier: NexusID.Agent
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: Adroitts
+PublisherUrl: https://nexusid.ai
+PackageName: NexusID Sync Agent
+PackageUrl: https://github.com/adroitts/nexusid-agent
+License: Proprietary
+ShortDescription: NexusID hybrid sync agent — AD/LDAP and database connector for the NexusID broker.
+Description: >-
+  Cross-platform sync agent that connects to the NexusID broker and synchronizes Active Directory
+  (LDAP/Kerberos/password writeback) or a database (bi-directional field sync), with encrypted
+  credentials and a tamper-evident local event log.
+Tags:
+  - identity
+  - active-directory
+  - ldap
+  - sync
+  - nexusid
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

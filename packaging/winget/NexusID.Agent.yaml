@@ -1,0 +1,6 @@
+# Version manifest (templated: __VERSION__ filled by the release pipeline).
+PackageIdentifier: NexusID.Agent
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

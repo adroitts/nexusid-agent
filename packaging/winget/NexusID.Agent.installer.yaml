@@ -1,0 +1,18 @@
+# Installer manifest (templated: __VERSION__ / __SHA256_X64__ / __SHA256_X86__ filled by the pipeline).
+# Portable CLI shipped as a zip; winget shims nexus-agent.exe onto PATH.
+PackageIdentifier: NexusID.Agent
+PackageVersion: __VERSION__
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: nexus-agent.exe
+    PortableCommandAlias: nexus-agent
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/adroitts/nexusid-agent/releases/download/v__VERSION__/nexus-agent-v__VERSION__-windows-x86_64.zip
+    InstallerSha256: __SHA256_X64__
+  - Architecture: x86
+    InstallerUrl: https://github.com/adroitts/nexusid-agent/releases/download/v__VERSION__/nexus-agent-v__VERSION__-windows-x86.zip
+    InstallerSha256: __SHA256_X86__
+ManifestType: installer
+ManifestVersion: 1.6.0
