@@ -68,15 +68,22 @@ See [`config.example.toml`](./config.example.toml).
 
 ## Run in Docker
 
-A multi-arch image (`linux/amd64` + `linux/arm64`) is published to GHCR on each release:
+A multi-arch image (`linux/amd64` + `linux/arm64`) is published to GHCR on each release. Pin
+`{version}` to the [release](https://github.com/adroitts/nexusid-agent/releases) you want (e.g. `0.1.1`):
 
 ```bash
+docker pull ghcr.io/adroitts/nexusid-agent:{version}
+
 docker run -d --name nexus-agent --restart unless-stopped \
   -v "$PWD/config.toml:/etc/nexus-agent/config.toml:ro" \
   -v nexus-agent-data:/var/lib/nexus-agent \
   -e NEXUS_AGENT_KEY -e AD_AGENT_TOKEN -e SECRET_ENCRYPTION_KEY \
-  ghcr.io/adroitts/nexusid-agent:latest
+  ghcr.io/adroitts/nexusid-agent:{version}
 ```
+
+Pin a version rather than `:latest` — the agent writes to your directory, so the running build
+should be deliberate and reproducible, and rolled out/back by changing the tag (not silently on the
+next pull).
 
 - Mount your `config.toml` read-only at `/etc/nexus-agent/config.toml`; point `audit_log` at
   `/var/lib/nexus-agent/audit.jsonl` (a named volume) so the hash-chained log persists.
