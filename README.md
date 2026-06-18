@@ -68,7 +68,7 @@ See [`config.example.toml`](./config.example.toml).
 
 ## Run in Docker
 
-A `linux/amd64` image is published to GHCR on each release (build locally for other arches):
+A multi-arch image (`linux/amd64` + `linux/arm64`) is published to GHCR on each release:
 
 ```bash
 docker run -d --name nexus-agent --restart unless-stopped \
