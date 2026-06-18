@@ -66,4 +66,22 @@ See [`config.example.toml`](./config.example.toml).
   `launchctl load -w …`.
 - **Windows:** wrap with the SCM (`sc.exe create NexusAgent binPath= "C:\nexus\nexus-agent.exe run --config C:\nexus\config.toml"`) or NSSM. The binary handles Ctrl-C/stop for graceful shutdown.
 
+## Run in Docker
+
+A `linux/amd64` image is published to GHCR on each release (build locally for other arches):
+
+```bash
+docker run -d --name nexus-agent --restart unless-stopped \
+  -v "$PWD/config.toml:/etc/nexus-agent/config.toml:ro" \
+  -v nexus-agent-data:/var/lib/nexus-agent \
+  -e NEXUS_AGENT_KEY -e AD_AGENT_TOKEN -e SECRET_ENCRYPTION_KEY \
+  ghcr.io/adroitts/nexusid-agent:latest
+```
+
+- Mount your `config.toml` read-only at `/etc/nexus-agent/config.toml`; point `audit_log` at
+  `/var/lib/nexus-agent/audit.jsonl` (a named volume) so the hash-chained log persists.
+- Supply `env:`/`enc:` secrets via `-e` (the image runs as a non-root user).
+- Or build locally: `docker build -t nexus-agent ./` — see [`Dockerfile`](./Dockerfile) and
+  [`docker-compose.example.yml`](./docker-compose.example.yml).
+
 Full guide: https://docs.nexusid.ai/iga/sync-agent

@@ -1,0 +1,21 @@
+# Example: run the NexusID Sync Agent as a container.
+#   docker compose -f docker-compose.example.yml up -d
+services:
+  nexus-agent:
+    # Use the published image, or `build: .` to build locally.
+    image: ghcr.io/adroitts/nexusid-agent:latest
+    # build: .
+    container_name: nexus-agent
+    restart: unless-stopped
+    environment:
+      # Secrets referenced by config.toml as env: / enc: — supply from your secret store.
+      NEXUS_AGENT_KEY: ${NEXUS_AGENT_KEY:-}        # vault key for enc: secrets (base64 32 bytes)
+      AD_AGENT_TOKEN: ${AD_AGENT_TOKEN:-}          # X-Agent-Token to the broker
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}  # broker key (decrypts issued passwords)
+      # Optional: surface this agent on a specific Directory Integration's "Online Agents" tile.
+      NEXUS_AGENT_DIRECTORY_ID: ${NEXUS_AGENT_DIRECTORY_ID:-}
+    volumes:
+      - ./config.toml:/etc/nexus-agent/config.toml:ro   # your agent config
+      - nexus-agent-data:/var/lib/nexus-agent           # persists the hash-chained audit log
+volumes:
+  nexus-agent-data:
