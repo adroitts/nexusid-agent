@@ -188,6 +188,30 @@ impl ServerClient {
         }
     }
 
+    /// Report the counters of one sync pass to the broker (per-run history). Best-effort.
+    pub async fn report_run(&self, mode: &str, counters: &crate::audit::SyncCounters) {
+        let url = format!("{}/agent/run", self.base_url);
+        let body = serde_json::json!({
+            "agentId": self.agent_id,
+            "mode": mode,
+            "inspected": counters.inspected,
+            "created": counters.created,
+            "updated": counters.updated,
+            "disabled": counters.disabled,
+            "failed": counters.failed,
+        });
+        if let Err(e) = self
+            .http
+            .post(&url)
+            .header("X-Agent-Token", &self.agent_token)
+            .json(&body)
+            .send()
+            .await
+        {
+            tracing::debug!("report_run failed (non-fatal): {e}");
+        }
+    }
+
     /// Tell the broker this agent is shutting down (logs a TERMINATED event). Best-effort.
     pub async fn disconnect(&self, reason: &str) {
         let url = format!("{}/agent/disconnect", self.base_url);

@@ -73,9 +73,16 @@ async fn run_cycle(
     // Register/refresh in the broker registry so the agent shows ONLINE in the console.
     server.heartbeat(config.agent.mode.as_str(), hostname, version, directory_id).await;
 
-    if let Err(e) = run_pass(config, server, cipher, audit).await {
-        tracing::error!("sync pass failed: {e}");
-        let _ = audit.append("RUN_ERROR", serde_json::json!({ "error": e.to_string() }));
+    match run_pass(config, server, cipher, audit).await {
+        // Report only passes that actually did work, so the run history isn't flooded with no-ops.
+        Ok(counters) if counters.inspected > 0 => {
+            server.report_run(config.agent.mode.as_str(), &counters).await;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("sync pass failed: {e}");
+            let _ = audit.append("RUN_ERROR", serde_json::json!({ "error": e.to_string() }));
+        }
     }
 
     tokio::time::sleep(Duration::from_secs(config.agent.poll_interval_secs)).await;
@@ -86,7 +93,7 @@ async fn run_pass(
     server: &ServerClient,
     cipher: &crate::crypto::Cipher,
     audit: &mut AuditLog,
-) -> Result<()> {
+) -> Result<crate::audit::SyncCounters> {
     let counters = match config.agent.mode {
         Mode::Ad => {
             let ad = config.ad.as_ref().expect("validated");
@@ -111,7 +118,7 @@ async fn run_pass(
         counters.disabled,
         counters.failed
     );
-    Ok(())
+    Ok(counters)
 }
 
 #[cfg(feature = "db")]

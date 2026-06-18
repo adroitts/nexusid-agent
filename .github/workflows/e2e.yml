@@ -1,0 +1,53 @@
+name: e2e (AD sync round-trip)
+
+# Brings up a real Samba Active Directory DC in a container and runs the agent's LdapConnector
+# against it — provisioning to AD (create + password writeback, enable, update, disable) and
+# reading every change back from AD to assert it landed ("to & fro").
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/e2e.yml'
+
+jobs:
+  ad-roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Start Samba AD DC
+        # --network host so Samba binds the runner's loopback directly → localhost:636 works
+        # without any smb.conf interface surgery. --privileged is required by the AD DC image.
+        run: |
+          docker run -d --name samba --privileged --network host \
+            -e REALM=EXAMPLE.ORG -e DOMAIN=EXAMPLE \
+            -e ADMIN_PASS='Passw0rd!2026' -e DNS_FORWARDER=8.8.8.8 \
+            diegogslomp/samba-ad-dc
+
+      - name: Wait for the domain to provision
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec samba samba-tool user list >/dev/null 2>&1 \
+               && timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/636' 2>/dev/null; then
+              echo "Samba AD DC ready (LDAPS up)"; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Samba did not become ready"; docker logs samba | tail -60; exit 1
+
+      - name: Run AD sync round-trip e2e
+        env:
+          NEXUS_TEST_LDAP_URL: ldaps://localhost:636
+          NEXUS_TEST_BIND_DN: CN=Administrator,CN=Users,DC=example,DC=org
+          NEXUS_TEST_BIND_PW: Passw0rd!2026
+          NEXUS_TEST_BASE_DN: DC=example,DC=org
+        run: cargo test ad_sync_round_trip -- --nocapture
+
+      - name: Samba logs on failure
+        if: failure()
+        run: docker logs samba | tail -80

@@ -13,6 +13,9 @@ mod modes;
 mod runner;
 mod server;
 
+#[cfg(test)]
+mod ad_e2e;
+
 use audit::AuditLog;
 use clap::{Parser, Subcommand};
 use config::Config;
