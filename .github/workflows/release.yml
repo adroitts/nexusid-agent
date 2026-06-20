@@ -40,6 +40,13 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Build .deb (Linux)
+        if: matrix.asset == 'linux-x86_64'
+        shell: bash
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build --target ${{ matrix.target }} -o "nexus-agent-${GITHUB_REF_NAME}-amd64.deb"
+
       - name: Set up macOS signing keychain
         if: runner.os == 'macOS'
         shell: bash
@@ -100,6 +107,31 @@ jobs:
           certificate-profile-name: cybrium
           files-folder: target/${{ matrix.target }}/release
           files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Build .msi (Windows)
+        if: matrix.asset == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          cargo install cargo-wix --locked
+          cargo wix init --force
+          cargo wix --no-build --nocapture --target ${{ matrix.target }} --output "nexus-agent-$env:GITHUB_REF_NAME-${{ matrix.asset }}.msi"
+
+      - name: Sign .msi (Azure Trusted Signing)
+        if: matrix.asset == 'windows-x86_64'
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: https://cus.codesigning.azure.net/
+          trusted-signing-account-name: cybrium-signing
+          certificate-profile-name: cybrium
+          files-folder: ${{ github.workspace }}
+          files-folder-filter: msi
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
@@ -179,6 +211,8 @@ jobs:
             nexus-agent-*.zip.sha256
             nexus-agent-*.pkg
             nexus-agent-*.pkg.sha256
+            nexus-agent-*.deb
+            nexus-agent-*.msi
 
   release:
     needs: build
