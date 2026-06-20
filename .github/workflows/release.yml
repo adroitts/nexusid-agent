@@ -70,7 +70,7 @@ jobs:
           if [ -n "$APPLE_CERT_P12" ]; then
             echo "$APPLE_CERT_P12" | base64 --decode > inst.p12
             security import inst.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/productsign \
-              || { echo "::error::Developer ID Installer import failed — check APPLE_CERT_P12 vs APPLE_CERT_PASSWORD"; exit 1; }
+              || echo "::warning::Developer ID Installer import failed (APPLE_CERT_P12 vs APPLE_CERT_PASSWORD) — .pkg will be unsigned"
           fi
           security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
           rm -f app.p12 inst.p12
@@ -176,18 +176,19 @@ jobs:
           printf '#!/bin/sh\necho "nexusID agent installed. Run: /usr/local/bin/nexus-agent setup"\nexit 0\n' > "$SCRIPTS/postinstall"
           chmod +x "$SCRIPTS/postinstall"
           pkgbuild --root "$PAYLOAD" --scripts "$SCRIPTS" --identifier ai.nexusid.agent --version "${VER#v}" --install-location / component.pkg
-          if [ -n "$APPLE_CERT_P12" ]; then
-            productsign --sign "${APPLE_SIGN_IDENTITY:-Developer ID Installer}" component.pkg "$PKG"
+          if productsign --sign "${APPLE_SIGN_IDENTITY:-Developer ID Installer}" component.pkg "$PKG" 2>/dev/null; then
+            SIGNED=yes
           else
-            mv component.pkg "$PKG"; echo "No Installer cert — .pkg unsigned"
+            mv component.pkg "$PKG"; SIGNED=no
+            echo "::warning::No Developer ID Installer identity — .pkg unsigned (and not notarizable)"
           fi
-          if [ -n "$APPLE_CERT_P12" ] && [ -n "$AC_API_KEY_P8" ]; then
+          if [ "$SIGNED" = yes ] && [ -n "$AC_API_KEY_P8" ]; then
             echo "$AC_API_KEY_P8" | base64 --decode > AuthKey.p8
             xcrun notarytool submit "$PKG" --key AuthKey.p8 --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait --timeout 30m
             xcrun stapler staple "$PKG"
             rm -f AuthKey.p8
           else
-            echo "Not notarized (missing Installer cert or notarization key)"
+            echo "::warning::.pkg not notarized (unsigned or no notarization key)"
           fi
           shasum -a 256 "$PKG" > "$PKG.sha256"
 
