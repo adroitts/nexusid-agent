@@ -40,6 +40,47 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Set up macOS signing keychain
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_APP_CERT_P12: ${{ secrets.APPLE_APP_CERT_P12 }}
+          APPLE_APP_CERT_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_APP_CERT_P12" ] && [ -z "$APPLE_CERT_P12" ]; then
+            echo "No Apple signing certs — skipping"; exit 0
+          fi
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          if [ -n "$APPLE_APP_CERT_P12" ]; then
+            echo "$APPLE_APP_CERT_P12" | base64 --decode > app.p12
+            security import app.p12 -k build.keychain -P "$APPLE_APP_CERT_PASSWORD" -T /usr/bin/codesign
+          fi
+          if [ -n "$APPLE_CERT_P12" ]; then
+            echo "$APPLE_CERT_P12" | base64 --decode > inst.p12
+            security import inst.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/productsign
+          fi
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
+          rm -f app.p12 inst.p12
+
+      - name: Codesign macOS binary (Developer ID Application + hardened runtime)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_APP_CERT_P12: ${{ secrets.APPLE_APP_CERT_P12 }}
+          APPLE_APP_IDENTITY: ${{ secrets.APPLE_APP_IDENTITY }}
+        run: |
+          BIN="target/${{ matrix.target }}/release/nexus-agent"
+          if [ -n "$APPLE_APP_CERT_P12" ]; then
+            codesign --force --options runtime --timestamp --sign "${APPLE_APP_IDENTITY:-Developer ID Application}" "$BIN"
+            codesign --verify --strict --verbose=2 "$BIN"
+          else
+            echo "No Developer ID Application cert — binary left unsigned"
+          fi
+
       # Authenticate so the Trusted Signing dlib's DefaultAzureCredential has a working source
       # (it picks up this az session via AzureCliCredential; env-var EnvironmentCredential alone
       # was not honored by the action).
@@ -81,6 +122,41 @@ jobs:
           tar -C stage -czf "${OUT}.tar.gz" .
           shasum -a 256 "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
 
+      - name: Build, sign + notarize .pkg (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"
+          PKG="nexus-agent-${VER}-${{ matrix.asset }}.pkg"
+          PAYLOAD="$(mktemp -d)"; SCRIPTS="$(mktemp -d)"
+          mkdir -p "$PAYLOAD/usr/local/bin" "$PAYLOAD/Library/LaunchDaemons"
+          install -m 0755 "target/${{ matrix.target }}/release/nexus-agent" "$PAYLOAD/usr/local/bin/nexus-agent"
+          [ -f dist/com.nexusid.agent.plist ] && install -m 0644 dist/com.nexusid.agent.plist "$PAYLOAD/Library/LaunchDaemons/" || true
+          printf '#!/bin/sh\necho "nexusID agent installed. Run: /usr/local/bin/nexus-agent setup"\nexit 0\n' > "$SCRIPTS/postinstall"
+          chmod +x "$SCRIPTS/postinstall"
+          pkgbuild --root "$PAYLOAD" --scripts "$SCRIPTS" --identifier ai.nexusid.agent --version "${VER#v}" --install-location / component.pkg
+          if [ -n "$APPLE_CERT_P12" ]; then
+            productsign --sign "${APPLE_SIGN_IDENTITY:-Developer ID Installer}" component.pkg "$PKG"
+          else
+            mv component.pkg "$PKG"; echo "No Installer cert — .pkg unsigned"
+          fi
+          if [ -n "$APPLE_CERT_P12" ] && [ -n "$AC_API_KEY_P8" ]; then
+            echo "$AC_API_KEY_P8" | base64 --decode > AuthKey.p8
+            xcrun notarytool submit "$PKG" --key AuthKey.p8 --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait --timeout 30m
+            xcrun stapler staple "$PKG"
+            rm -f AuthKey.p8
+          else
+            echo "Not notarized (missing Installer cert or notarization key)"
+          fi
+          shasum -a 256 "$PKG" > "$PKG.sha256"
+
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -101,6 +177,8 @@ jobs:
             nexus-agent-*.tar.gz.sha256
             nexus-agent-*.zip
             nexus-agent-*.zip.sha256
+            nexus-agent-*.pkg
+            nexus-agent-*.pkg.sha256
 
   release:
     needs: build
