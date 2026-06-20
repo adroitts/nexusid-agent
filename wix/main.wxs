@@ -91,15 +91,17 @@
           these after files are installed and starts the service. AD_BIND_PASSWORD is Hidden so it is not
           written to the verbose MSI log.
         -->
-        <Property Id='IDP_URL' Value='https://demo.nexusid.ai'/>
-        <Property Id='AGENT_ID' Value='dc-01-agent'/>
-        <Property Id='AGENT_TOKEN' Value='' Secure='yes'/>
-        <Property Id='AGENT_MODE' Value='ad'/>
+        <!-- Secure='yes' so UI/command-line values propagate to the deferred CustomAction (execute
+             sequence). Empty-default properties omit Value (WiX rejects Value=''; CNDL0006). -->
+        <Property Id='IDP_URL' Value='https://demo.nexusid.ai' Secure='yes'/>
+        <Property Id='AGENT_ID' Value='dc-01-agent' Secure='yes'/>
+        <Property Id='AGENT_TOKEN' Secure='yes'/>
+        <Property Id='AGENT_MODE' Value='ad' Secure='yes'/>
         <Property Id='AGENT_SECRET_KEY' Value='env:SECRET_ENCRYPTION_KEY' Secure='yes'/>
-        <Property Id='AD_URL' Value='ldaps://dc01.corp.example.com:636'/>
-        <Property Id='AD_BIND_DN' Value=''/>
-        <Property Id='AD_BIND_PASSWORD' Value='' Hidden='yes' Secure='yes'/>
-        <Property Id='AD_BASE_DN' Value=''/>
+        <Property Id='AD_URL' Value='ldaps://dc01.corp.example.com:636' Secure='yes'/>
+        <Property Id='AD_BIND_DN' Secure='yes'/>
+        <Property Id='AD_BIND_PASSWORD' Hidden='yes' Secure='yes'/>
+        <Property Id='AD_BASE_DN' Secure='yes'/>
 
         <!--
           After files are laid down, write config.toml from the collected properties and start the
