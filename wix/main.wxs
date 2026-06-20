@@ -85,6 +85,38 @@
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='nexus-agent Installation'/>
 
+        <!--
+          Setup values collected by ConfigDlg during install (or passed to msiexec for silent installs:
+          msiexec /i nexus-agent.msi AGENT_TOKEN=... IDP_URL=...). A CustomAction writes config.toml from
+          these after files are installed and starts the service. AD_BIND_PASSWORD is Hidden so it is not
+          written to the verbose MSI log.
+        -->
+        <Property Id='IDP_URL' Value='https://demo.nexusid.ai'/>
+        <Property Id='AGENT_ID' Value='dc-01-agent'/>
+        <Property Id='AGENT_TOKEN' Value='' Secure='yes'/>
+        <Property Id='AGENT_MODE' Value='ad'/>
+        <Property Id='AGENT_SECRET_KEY' Value='env:SECRET_ENCRYPTION_KEY' Secure='yes'/>
+        <Property Id='AD_URL' Value='ldaps://dc01.corp.example.com:636'/>
+        <Property Id='AD_BIND_DN' Value=''/>
+        <Property Id='AD_BIND_PASSWORD' Value='' Hidden='yes' Secure='yes'/>
+        <Property Id='AD_BASE_DN' Value=''/>
+
+        <!--
+          After files are laid down, write config.toml from the collected properties and start the
+          NexusAgent service. The immediate CA stuffs the command line into the RunSetup property, which
+          the deferred (elevated, no-impersonate) WixQuietExec reads as its CustomActionData. Only runs on
+          a fresh/upgrade install where a token was provided (a double-click install with no token leaves
+          the service registered but unconfigured; the user then runs `nexus-agent setup`).
+        -->
+        <CustomAction Id='SetRunSetupCmd' Property='RunSetup' Execute='immediate'
+            Value='&quot;[#exe0]&quot; setup --non-interactive --config &quot;C:\ProgramData\NexusAgent\config.toml&quot; --idp-url &quot;[IDP_URL]&quot; --token &quot;[AGENT_TOKEN]&quot; --agent-id &quot;[AGENT_ID]&quot; --mode &quot;[AGENT_MODE]&quot; --secret-key &quot;[AGENT_SECRET_KEY]&quot; --ad-url &quot;[AD_URL]&quot; --bind-dn &quot;[AD_BIND_DN]&quot; --bind-password &quot;[AD_BIND_PASSWORD]&quot; --base-dn &quot;[AD_BASE_DN]&quot;'/>
+        <CustomAction Id='RunSetup' BinaryKey='WixCA' DllEntry='WixQuietExec'
+            Execute='deferred' Impersonate='no' Return='ignore'/>
+        <InstallExecuteSequence>
+            <Custom Action='SetRunSetupCmd' After='InstallFiles'>NOT Installed AND AGENT_TOKEN</Custom>
+            <Custom Action='RunSetup' After='SetRunSetupCmd'>NOT Installed AND AGENT_TOKEN</Custom>
+        </InstallExecuteSequence>
+
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='nexus-agent'>
@@ -211,6 +243,43 @@
 
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>
+
+            <!-- Custom configuration page: collect the IDP URL, agent token, and AD connection. -->
+            <Dialog Id='ConfigDlg' Width='370' Height='270' Title='[ProductName] Setup'>
+                <Control Id='Title' Type='Text' X='15' Y='6' Width='340' Height='15' Transparent='yes' NoPrefix='yes' Text='{\WixUI_Font_Title}NexusID agent configuration'/>
+                <Control Id='Desc' Type='Text' X='25' Y='23' Width='340' Height='20' Transparent='yes' Text='Enter the IDP URL and agent token (from Register agent in the console), then the AD connection. Leave blank to configure later with nexus-agent setup.'/>
+                <Control Id='BannerLine' Type='Line' X='0' Y='44' Width='370' Height='0'/>
+
+                <Control Id='IdpLabel' Type='Text' X='25' Y='60' Width='105' Height='12' Text='IDP / broker URL:'/>
+                <Control Id='IdpEdit' Type='Edit' X='135' Y='58' Width='210' Height='16' Property='IDP_URL'/>
+                <Control Id='TokenLabel' Type='Text' X='25' Y='82' Width='105' Height='12' Text='Agent token:'/>
+                <Control Id='TokenEdit' Type='Edit' X='135' Y='80' Width='210' Height='16' Property='AGENT_TOKEN'/>
+                <Control Id='AgentIdLabel' Type='Text' X='25' Y='104' Width='105' Height='12' Text='Agent id:'/>
+                <Control Id='AgentIdEdit' Type='Edit' X='135' Y='102' Width='210' Height='16' Property='AGENT_ID'/>
+                <Control Id='AdUrlLabel' Type='Text' X='25' Y='126' Width='105' Height='12' Text='AD URL (LDAPS):'/>
+                <Control Id='AdUrlEdit' Type='Edit' X='135' Y='124' Width='210' Height='16' Property='AD_URL'/>
+                <Control Id='BindDnLabel' Type='Text' X='25' Y='148' Width='105' Height='12' Text='AD bind DN:'/>
+                <Control Id='BindDnEdit' Type='Edit' X='135' Y='146' Width='210' Height='16' Property='AD_BIND_DN'/>
+                <Control Id='BindPwLabel' Type='Text' X='25' Y='170' Width='105' Height='12' Text='AD bind password:'/>
+                <Control Id='BindPwEdit' Type='Edit' X='135' Y='168' Width='210' Height='16' Password='yes' Property='AD_BIND_PASSWORD'/>
+                <Control Id='BaseDnLabel' Type='Text' X='25' Y='192' Width='105' Height='12' Text='AD base DN:'/>
+                <Control Id='BaseDnEdit' Type='Edit' X='135' Y='190' Width='210' Height='16' Property='AD_BASE_DN'/>
+
+                <Control Id='Back' Type='PushButton' X='180' Y='243' Width='56' Height='17' Text='Back'>
+                    <Publish Event='NewDialog' Value='CustomizeDlg'>1</Publish>
+                </Control>
+                <Control Id='Next' Type='PushButton' X='236' Y='243' Width='56' Height='17' Default='yes' Text='Next'>
+                    <Publish Event='NewDialog' Value='VerifyReadyDlg'>1</Publish>
+                </Control>
+                <Control Id='Cancel' Type='PushButton' X='304' Y='243' Width='56' Height='17' Cancel='yes' Text='Cancel'>
+                    <Publish Event='SpawnDialog' Value='CancelDlg'>1</Publish>
+                </Control>
+            </Dialog>
+
+            <!-- Insert ConfigDlg between CustomizeDlg and VerifyReadyDlg (higher Order overrides the
+                 stock WixUI_FeatureTree navigation). -->
+            <Publish Dialog='CustomizeDlg' Control='Next' Event='NewDialog' Value='ConfigDlg' Order='10'>1</Publish>
+            <Publish Dialog='VerifyReadyDlg' Control='Back' Event='NewDialog' Value='ConfigDlg' Order='10'>1</Publish>
             
             <!--
               Enabling the EULA dialog in the installer is a three step process:

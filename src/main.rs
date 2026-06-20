@@ -35,10 +35,31 @@ enum Command {
         #[arg(short, long, default_value = "config.toml")]
         config: String,
     },
-    /// Interactive first-run wizard: enter the IDP URL + agent token, write config.toml, verify the broker.
+    /// First-run setup: interactive wizard, or --non-interactive with flags (the installer uses this).
     Setup {
         #[arg(short, long, default_value = "config.toml")]
         config: String,
+        /// Run without prompts, using the flags below (for the MSI CustomAction / silent installs).
+        #[arg(long)]
+        non_interactive: bool,
+        #[arg(long)]
+        idp_url: Option<String>,
+        #[arg(long)]
+        agent_id: Option<String>,
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        mode: Option<String>,
+        #[arg(long)]
+        secret_key: Option<String>,
+        #[arg(long)]
+        ad_url: Option<String>,
+        #[arg(long)]
+        bind_dn: Option<String>,
+        #[arg(long)]
+        bind_password: Option<String>,
+        #[arg(long)]
+        base_dn: Option<String>,
     },
     /// Install / uninstall the Windows Service (runs under the Service Control Manager). Windows only.
     Service {
@@ -105,7 +126,26 @@ async fn dispatch(cli: Cli) -> error::Result<()> {
             let cfg = Config::load(&config)?;
             runner::run(cfg).await
         }
-        Command::Setup { config } => setup_wizard(&config).await,
+        Command::Setup {
+            config, non_interactive, idp_url, agent_id, token, mode, secret_key, ad_url, bind_dn, bind_password, base_dn,
+        } => {
+            if non_interactive {
+                let v = SetupValues {
+                    base_url: idp_url.unwrap_or_default(),
+                    agent_id: agent_id.unwrap_or_else(|| "dc-01-agent".into()),
+                    agent_token: token.unwrap_or_default(),
+                    mode: mode.unwrap_or_else(|| "ad".into()),
+                    secret_key: secret_key.unwrap_or_else(|| "env:SECRET_ENCRYPTION_KEY".into()),
+                    ad_url: ad_url.unwrap_or_default(),
+                    bind_dn: bind_dn.unwrap_or_default(),
+                    bind_password: bind_password.unwrap_or_default(),
+                    base_dn: base_dn.unwrap_or_default(),
+                };
+                setup_noninteractive(&config, v).await
+            } else {
+                setup_wizard(&config).await
+            }
+        }
         Command::Service { action } => {
             #[cfg(windows)]
             {
@@ -184,8 +224,43 @@ async fn dispatch(cli: Cli) -> error::Result<()> {
 /// Interactive first-run wizard: prompts for the IDP URL + agent token (and AD connection), writes a
 /// config.toml, and verifies the broker is reachable. Cross-platform (plain stdin) — the installer can
 /// launch this post-install so the admin just enters the URL and the agent is wired up.
+/// The values a setup needs — collected interactively by the wizard or passed as flags by the installer.
+struct SetupValues {
+    base_url: String,
+    agent_id: String,
+    agent_token: String,
+    mode: String,
+    secret_key: String,
+    ad_url: String,
+    bind_dn: String,
+    bind_password: String,
+    base_dn: String,
+}
+
+/// Interactive first-run wizard: prompt for each value, then write config + start the service.
 async fn setup_wizard(config_path: &str) -> error::Result<()> {
     println!("\nnexusID sync agent — setup\n");
+    let v = SetupValues {
+        base_url: prompt("IDP / broker URL", "https://demo.nexusid.ai")?,
+        agent_id: prompt("Agent id", "dc-01-agent")?,
+        agent_token: prompt("Agent token (from 'Register agent')", "")?,
+        mode: prompt("Mode (ad/db)", "ad")?,
+        secret_key: prompt("Secret key — env:, enc:, or the per-agent key from the downloaded config", "env:SECRET_ENCRYPTION_KEY")?,
+        ad_url: prompt("AD url (the broker can override this live)", "ldaps://dc01.corp.example.com:636")?,
+        bind_dn: prompt("AD bind DN", "CN=svc-nexus,OU=Service Accounts,DC=corp,DC=example,DC=com")?,
+        bind_password: prompt("AD bind password", "")?,
+        base_dn: prompt("AD base DN", "DC=corp,DC=example,DC=com")?,
+    };
+    finalize_setup(config_path, v, true).await
+}
+
+/// Non-interactive setup for the installer / silent deploys (values come from flags, no prompts).
+async fn setup_noninteractive(config_path: &str, v: SetupValues) -> error::Result<()> {
+    finalize_setup(config_path, v, false).await
+}
+
+/// Shared: harden secrets, write config.toml (never plaintext), verify the broker, and start the service.
+async fn finalize_setup(config_path: &str, v: SetupValues, interactive: bool) -> error::Result<()> {
     // On Windows the MSI-registered service reads ProgramData; write there by default so they agree.
     let config_path = effective_config_path(config_path);
     if let Some(parent) = std::path::Path::new(&config_path).parent() {
@@ -193,15 +268,10 @@ async fn setup_wizard(config_path: &str) -> error::Result<()> {
             let _ = std::fs::create_dir_all(parent);
         }
     }
-    let base_url = prompt("IDP / broker URL", "https://demo.nexusid.ai")?;
-    let agent_id = prompt("Agent id", "dc-01-agent")?;
-    let agent_token = prompt("Agent token (from 'Register agent')", "")?;
-    let mode = prompt("Mode (ad/db)", "ad")?;
-    let secret_key_in = prompt("Secret key — env:, enc:, or the per-agent key from the downloaded config", "env:SECRET_ENCRYPTION_KEY")?;
-    let ad_url = prompt("AD url (the broker can override this live)", "ldaps://dc01.corp.example.com:636")?;
-    let bind_dn = prompt("AD bind DN", "CN=svc-nexus,OU=Service Accounts,DC=corp,DC=example,DC=com")?;
-    let bind_password_in = prompt("AD bind password", "")?;
-    let base_dn = prompt("AD base DN", "DC=corp,DC=example,DC=com")?;
+    let SetupValues {
+        base_url, agent_id, agent_token, mode,
+        secret_key: secret_key_in, ad_url, bind_dn, bind_password: bind_password_in, base_dn,
+    } = v;
 
     // Never persist a raw secret on disk: pass env:/enc: through; encrypt a pasted raw value with the
     // local vault (NEXUS_AGENT_KEY) to enc:; with no vault, fall back to an env: reference + a note.
@@ -236,14 +306,20 @@ async fn setup_wizard(config_path: &str) -> error::Result<()> {
         Err(e) => println!("[warn] config written but did not validate: {e}"),
     }
 
-    // On Windows, start the service (the MSI may have already registered it; otherwise register it now).
+    // On Windows, start the service (the MSI registered it; otherwise register it now). The installer
+    // path (non-interactive) starts it unconditionally; the wizard asks first.
     #[cfg(windows)]
     {
         let abs = std::fs::canonicalize(&config_path)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| config_path.clone());
-        let ans = prompt("Start the NexusAgent Windows Service now (runs on boot; needs an elevated prompt)? [Y/n]", "y")?;
-        if !ans.eq_ignore_ascii_case("n") {
+        let start = if interactive {
+            !prompt("Start the NexusAgent Windows Service now (runs on boot; needs an elevated prompt)? [Y/n]", "y")?
+                .eq_ignore_ascii_case("n")
+        } else {
+            true
+        };
+        if start {
             match service::ensure_running(&abs) {
                 Ok(()) => println!("[ok] Windows Service 'NexusAgent' is running"),
                 Err(e) => println!("[warn] could not start the service ({e})\n       run an elevated prompt, then:  nexus-agent service install -c \"{abs}\""),
@@ -256,6 +332,7 @@ async fn setup_wizard(config_path: &str) -> error::Result<()> {
 
     #[cfg(not(windows))]
     {
+        let _ = interactive;
         println!("\nNext: nexus-agent run -c {config_path}\n");
         Ok(())
     }
