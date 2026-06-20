@@ -176,11 +176,13 @@ jobs:
           printf '#!/bin/sh\necho "nexusID agent installed. Run: /usr/local/bin/nexus-agent setup"\nexit 0\n' > "$SCRIPTS/postinstall"
           chmod +x "$SCRIPTS/postinstall"
           pkgbuild --root "$PAYLOAD" --scripts "$SCRIPTS" --identifier ai.nexusid.agent --version "${VER#v}" --install-location / component.pkg
-          if productsign --sign "${APPLE_SIGN_IDENTITY:-Developer ID Installer}" component.pkg "$PKG" 2>/dev/null; then
+          INSTALLER_ID="$(security find-identity -v -p basic build.keychain 2>/dev/null | sed -n 's/.*"\(Developer ID Installer:[^"]*\)".*/\1/p' | head -1)"
+          echo "Installer identity: ${INSTALLER_ID:-<none found>}"
+          if [ -n "$INSTALLER_ID" ] && productsign --sign "$INSTALLER_ID" component.pkg "$PKG"; then
             SIGNED=yes
           else
-            mv component.pkg "$PKG"; SIGNED=no
-            echo "::warning::No Developer ID Installer identity — .pkg unsigned (and not notarizable)"
+            mv component.pkg "$PKG" 2>/dev/null || true; SIGNED=no
+            echo "::warning::No Developer ID Installer identity in keychain — .pkg unsigned"
           fi
           if [ "$SIGNED" = yes ] && [ -n "$AC_API_KEY_P8" ]; then
             echo "$AC_API_KEY_P8" | base64 --decode > AuthKey.p8
@@ -272,6 +274,10 @@ jobs:
             dist/**/*.tar.gz.sha256
             dist/**/*.zip
             dist/**/*.zip.sha256
+            dist/**/*.deb
+            dist/**/*.msi
+            dist/**/*.pkg
+            dist/**/*.pkg.sha256
             out/install.ps1
             out/install.sh
             out/*.zip
