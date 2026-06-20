@@ -122,7 +122,8 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix --locked
-          cargo wix init --force
+          # Use the checked-in wix/main.wxs (registers the NexusAgent Windows Service) — do NOT
+          # regenerate with `cargo wix init`, which would overwrite it with a service-less template.
           cargo wix --no-build --nocapture --target ${{ matrix.target }} --output "nexus-agent-$env:GITHUB_REF_NAME-${{ matrix.asset }}.msi"
 
       - name: Sign .msi (Azure Trusted Signing)

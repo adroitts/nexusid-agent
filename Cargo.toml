@@ -1,7 +1,7 @@
 [package]
 name = "nexus-agent"
+version = "0.1.3"
 authors = ["NexusID <support@nexusid.ai>"]
-version = "0.1.2"
 edition = "2021"
 rust-version = "1.78"
 description = "NexusID hybrid sync agent — AD/LDAP and database connector with egress↔ingress to the broker, encrypted credentials, and a tamper-evident local event log."
@@ -9,9 +9,9 @@ license = "Proprietary"
 
 [[bin]]
 name = "nexus-agent"
-authors = ["NexusID <support@nexusid.ai>"]
 path = "src/main.rs"
 
+# Linux .deb (cargo-deb): installs the binary + systemd unit + example config.
 [package.metadata.deb]
 maintainer = "NexusID <support@nexusid.ai>"
 copyright = "NexusID"
@@ -25,6 +25,7 @@ assets = [
 ]
 conf-files = ["/etc/nexus-agent/config.example.toml"]
 
+# Windows .msi (cargo-wix): run `cargo wix init` once to generate wix/main.wxs, then `cargo wix`.
 [package.metadata.wix]
 upgrade-guid = "5F8C2E1A-9B4D-4C7E-A2F1-7D3E9C5B1A20"
 path-guid = "6A9D3F2B-0C5E-4D8F-B3A2-8E4FAD6C2B31"
@@ -57,3 +58,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 gethostname = "0.5"
+
+# Windows Service support (run under the SCM, like the systemd unit / launchd plist elsewhere).
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"

@@ -49,7 +49,7 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::select! {
             biased;
             _ = &mut shutdown_rx => break,
-            _ = run_cycle(&config, &server, &cipher, &hostname, version, directory_id.as_deref(), &mut audit) => {}
+            _ = run_one(&config, &server, &cipher, &hostname, version, directory_id.as_deref(), &mut audit) => {}
         }
     }
     // Only reachable via the shutdown branch; the work future is dropped here, freeing &mut audit.
@@ -57,6 +57,25 @@ pub async fn run(config: Config) -> Result<()> {
     server.disconnect("agent shutdown").await;
     let _ = audit.append("RUN_STOP", serde_json::json!({ "mode": config.agent.mode.as_str() }));
     Ok(())
+}
+
+/// Refresh live config from the broker (best-effort), then run one cycle with the effective config — so
+/// connection changes made in the SyncAgent UI take effect within one interval, no re-download.
+async fn run_one(
+    base: &Config,
+    server: &ServerClient,
+    cipher: &crate::crypto::Cipher,
+    hostname: &str,
+    version: &str,
+    directory_id: Option<&str>,
+    audit: &mut AuditLog,
+) {
+    let mut eff = base.clone();
+    match server.fetch_config().await {
+        Ok(remote) => eff.apply_remote(&remote),
+        Err(e) => tracing::debug!("config refresh skipped (using local config): {e}"),
+    }
+    run_cycle(&eff, server, cipher, hostname, version, directory_id, audit).await;
 }
 
 /// One full cycle: register a heartbeat, run a sync pass, then idle for the poll interval. Cancellable

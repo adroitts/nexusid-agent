@@ -158,3 +158,54 @@ impl Config {
         Cipher::from_base64_key(&key, "local-default")
     }
 }
+
+/// The broker's live runtime config (GET /agent/ad/config) — connection settings the agent refreshes
+/// each cycle so changes made in the SyncAgent UI apply without re-downloading config.toml.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RemoteConfig {
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub poll_interval_secs: Option<u64>,
+    #[serde(default)]
+    pub directory: Option<RemoteDirectory>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RemoteDirectory {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub bind_dn: Option<String>,
+    #[serde(default)]
+    pub base_dn: Option<String>,
+    #[serde(default)]
+    pub password_writeback: Option<bool>,
+}
+
+impl Config {
+    /// Merge the broker's live config over the local bootstrap. Connection settings only — the bind
+    /// password and secret key stay on-prem and are never transmitted. Lets a connection change made in
+    /// the UI (DC failover, OU move, base DN) take effect within one poll interval, no re-download.
+    pub fn apply_remote(&mut self, remote: &RemoteConfig) {
+        if let Some(p) = remote.poll_interval_secs {
+            if p > 0 {
+                self.agent.poll_interval_secs = p;
+            }
+        }
+        if let (Some(dir), Some(ad)) = (remote.directory.as_ref(), self.ad.as_mut()) {
+            if let Some(u) = dir.url.as_deref().filter(|s| !s.is_empty()) {
+                ad.url = u.to_string();
+            }
+            if let Some(b) = dir.bind_dn.as_deref().filter(|s| !s.is_empty()) {
+                ad.bind_dn = b.to_string();
+            }
+            if let Some(b) = dir.base_dn.as_deref().filter(|s| !s.is_empty()) {
+                ad.base_dn = b.to_string();
+            }
+            if let Some(w) = dir.password_writeback {
+                ad.password_writeback = w;
+            }
+        }
+    }
+}

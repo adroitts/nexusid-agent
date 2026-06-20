@@ -69,6 +69,26 @@ impl ServerClient {
         })
     }
 
+    /// Fetch the agent's live runtime config from the broker (connection settings + mapping). The agent
+    /// refreshes this each cycle so SyncAgent-UI changes apply without re-downloading config.toml.
+    pub async fn fetch_config(&self) -> Result<crate::config::RemoteConfig> {
+        let url = format!("{}/agent/ad/config", self.base_url);
+        let resp = self
+            .http
+            .get(&url)
+            .header("X-Agent-Token", &self.agent_token)
+            .header("X-Agent-Id", &self.agent_id)
+            .send()
+            .await
+            .map_err(|e| AgentError::Server(format!("fetch config: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(AgentError::Server(format!("config returned HTTP {}", resp.status())));
+        }
+        resp.json()
+            .await
+            .map_err(|e| AgentError::Server(format!("config decode: {e}")))
+    }
+
     /// Claim up to `limit` pending AD operations.
     pub async fn poll_operations(&self, limit: u32) -> Result<Vec<Operation>> {
         let url = format!("{}/agent/ad/operations?limit={}", self.base_url, limit);
