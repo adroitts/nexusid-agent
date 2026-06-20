@@ -64,11 +64,13 @@ jobs:
           security unlock-keychain -p ci build.keychain
           if [ -n "$APPLE_APP_CERT_P12" ]; then
             echo "$APPLE_APP_CERT_P12" | base64 --decode > app.p12
-            security import app.p12 -k build.keychain -P "$APPLE_APP_CERT_PASSWORD" -T /usr/bin/codesign
+            security import app.p12 -k build.keychain -P "$APPLE_APP_CERT_PASSWORD" -T /usr/bin/codesign \
+              || { echo "::error::Developer ID Application import failed — check APPLE_APP_CERT_P12 vs APPLE_APP_PASSWORD"; exit 1; }
           fi
           if [ -n "$APPLE_CERT_P12" ]; then
             echo "$APPLE_CERT_P12" | base64 --decode > inst.p12
-            security import inst.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/productsign
+            security import inst.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/productsign \
+              || { echo "::error::Developer ID Installer import failed — check APPLE_CERT_P12 vs APPLE_CERT_PASSWORD"; exit 1; }
           fi
           security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
           rm -f app.p12 inst.p12
