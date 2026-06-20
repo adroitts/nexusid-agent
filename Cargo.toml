@@ -10,6 +10,23 @@ license = "Proprietary"
 name = "nexus-agent"
 path = "src/main.rs"
 
+[package.metadata.deb]
+maintainer = "NexusID <support@nexusid.ai>"
+copyright = "NexusID"
+extended-description = "On-prem sync agent for hybrid AD/LDAP and database provisioning with the NexusID broker."
+section = "admin"
+priority = "optional"
+assets = [
+    ["target/release/nexus-agent", "usr/bin/", "755"],
+    ["dist/nexus-agent.service", "lib/systemd/system/", "644"],
+    ["config.example.toml", "etc/nexus-agent/config.example.toml", "644"],
+]
+conf-files = ["/etc/nexus-agent/config.example.toml"]
+
+[package.metadata.wix]
+upgrade-guid = "5F8C2E1A-9B4D-4C7E-A2F1-7D3E9C5B1A20"
+path-guid = "6A9D3F2B-0C5E-4D8F-B3A2-8E4FAD6C2B31"
+
 [features]
 # Default build is portable (no system Kerberos/GSSAPI libs required) so it compiles everywhere.
 default = ["db"]
