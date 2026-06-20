@@ -130,10 +130,10 @@
 
                             <!--
                               Register the agent as a Windows Service (auto-start, LocalSystem). The SCM
-                              launches `nexus-agent.exe run-service --config <ProgramData path>`. We do NOT
-                              start it during install (config.toml doesn't exist yet) — `nexus-agent setup`
-                              writes the config to that same path and starts the service. The service is
-                              stopped + removed on uninstall.
+                              launches nexus-agent.exe in run-service mode with the ProgramData config
+                              path. We do NOT start it during install (config.toml does not exist yet);
+                              'nexus-agent setup' writes the config to that same path and starts the
+                              service. The service is stopped and removed on uninstall.
                             -->
                             <ServiceInstall
                                 Id='NexusAgentService'
