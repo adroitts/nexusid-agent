@@ -122,9 +122,10 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix --locked
-          # Use the checked-in wix/main.wxs (registers the NexusAgent Windows Service) — do NOT
-          # regenerate with `cargo wix init`, which would overwrite it with a service-less template.
-          cargo wix --no-build --nocapture -C -ext -C WixUtilExtension -L -ext -L WixUtilExtension --target ${{ matrix.target }} --output "nexus-agent-$env:GITHUB_REF_NAME-${{ matrix.asset }}.msi"
+          # Use the checked-in wix/main.wxs (service + ConfigDlg). Do NOT run `cargo wix init` (would
+          # overwrite it). cargo-wix auto-loads WixUtilExtension + WixUIExtension — adding them again
+          # collides (CNDL0125), so don't pass -ext for those.
+          cargo wix --no-build --nocapture --target ${{ matrix.target }} --output "nexus-agent-$env:GITHUB_REF_NAME-${{ matrix.asset }}.msi"
 
       - name: Sign .msi (Azure Trusted Signing)
         if: matrix.asset == 'windows-x86_64'
