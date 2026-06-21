@@ -14,6 +14,14 @@ const BATCH: u32 = 25;
 
 pub async fn run(config: Config) -> Result<()> {
     let mut audit = AuditLog::open(&config.agent.audit_log)?;
+    tracing::info!(
+        "config: base_url={} mode={} verify_tls={} agent_token={} secret_key={}",
+        config.server.base_url,
+        config.agent.mode.as_str(),
+        config.server.verify_tls,
+        Config::describe(&config.server.agent_token),
+        Config::describe(&config.server.secret_key),
+    );
     let token = Config::resolve(&config.server.agent_token)?;
     let server = ServerClient::new(
         &config.server.base_url,

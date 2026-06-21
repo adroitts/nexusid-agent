@@ -102,14 +102,49 @@ enum ServiceAction {
     Uninstall,
 }
 
+/// Where the agent writes its rolling log file. Override with NEXUS_AGENT_LOG_DIR.
+fn default_log_dir() -> String {
+    if let Ok(d) = std::env::var("NEXUS_AGENT_LOG_DIR") {
+        return d;
+    }
+    #[cfg(windows)]
+    {
+        r"C:\ProgramData\NexusAgent\logs".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        "/var/lib/nexus-agent/logs".to_string()
+    }
+}
+
+fn make_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+}
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    use tracing_subscriber::prelude::*;
+    // Log to a rolling daily file (so the Windows service isn't a black box) AND stdout (foreground).
+    let log_dir = default_log_dir();
+    let _log_guard = match std::fs::create_dir_all(&log_dir) {
+        Ok(()) => {
+            let (file_writer, guard) =
+                tracing_appender::non_blocking(tracing_appender::rolling::daily(&log_dir, "nexus-agent.log"));
+            tracing_subscriber::registry()
+                .with(make_filter())
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+                .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(file_writer))
+                .init();
+            eprintln!("[nexus-agent] logging to {log_dir}{}nexus-agent.log", std::path::MAIN_SEPARATOR);
+            Some(guard)
+        }
+        Err(e) => {
+            tracing_subscriber::fmt().with_env_filter(make_filter()).init();
+            eprintln!("[nexus-agent] file logging disabled ({e}); stdout only");
+            None
+        }
+    };
 
     match dispatch(Cli::parse()).await {
         Ok(()) => std::process::ExitCode::SUCCESS,

@@ -1,6 +1,6 @@
 [package]
 name = "nexus-agent"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["NexusID <support@nexusid.ai>"]
 edition = "2021"
 rust-version = "1.78"
@@ -53,6 +53,7 @@ ldap3 = { version = "0.11", default-features = false, features = ["tls-rustls"] 
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "any", "postgres", "mysql", "sqlite", "chrono", "json"], optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 thiserror = "1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }

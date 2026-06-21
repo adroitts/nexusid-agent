@@ -22,6 +22,13 @@ pub struct AdMode<'a> {
 impl AdMode<'_> {
     /// Run a single drain pass; returns the counters for this pass.
     pub async fn run_once(&self, audit: &mut AuditLog) -> Result<SyncCounters> {
+        tracing::info!(
+            "AD connect: url={} bind_dn={} verify_tls={} bind_password={}",
+            self.ad.url,
+            self.ad.bind_dn,
+            self.verify_tls,
+            crate::config::Config::describe(&self.ad.bind_password),
+        );
         let bind_pw = crate::config::Config::resolve(&self.ad.bind_password)?;
         let mut ldap = LdapConnector::connect(
             &self.ad.url,
@@ -89,6 +96,28 @@ impl AdMode<'_> {
                 let attrs = parse_attrs(op.attributes_json.as_deref())?;
                 let dn = ldap.update_attributes(self.email(op)?, &attrs).await?;
                 Ok(serde_json::json!({ "dn": dn, "updated": attrs.len() }))
+            }
+            "TEST_CONNECTION" => {
+                // Broker-issued connectivity probe: we're already bound, so confirm the base DN reads.
+                let n = ldap.test_base().await?;
+                Ok(serde_json::json!({ "ok": true, "base_dn_entries": n }))
+            }
+            "SYNC_USERS" => {
+                // Agent-routed inbound sync: search AD for users and return them for the broker to upsert.
+                let params = parse_attrs(op.attributes_json.as_deref())?;
+                let base = params
+                    .get("userBaseDn")
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .or_else(|| op.target_base_dn.clone())
+                    .ok_or_else(|| crate::error::AgentError::Ldap("SYNC_USERS missing base DN".into()))?;
+                let filter = params
+                    .get("filter")
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| "(&(objectClass=user)(objectCategory=person))".to_string());
+                let users = ldap.search_users(&base, &filter).await?;
+                Ok(serde_json::json!({ "users": users, "inspected": users.len() }))
             }
             other => Err(crate::error::AgentError::Ldap(format!("unknown op type: {other}"))),
         }

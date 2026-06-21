@@ -137,6 +137,24 @@ impl Config {
     }
 
     /// Resolve a secret-bearing field to its plaintext value.
+    /// A log-safe description of a secret config value: its source (`env:NAME`, `enc:`, or inline) and
+    /// whether it resolved + the resolved length — never the value itself. For diagnosing "is the
+    /// password/key actually loaded" without leaking it.
+    pub fn describe(raw: &str) -> String {
+        let src = if let Some(v) = raw.strip_prefix("env:") {
+            format!("env:{v}")
+        } else if raw.starts_with("enc:") {
+            "enc:(vault)".to_string()
+        } else {
+            "inline".to_string()
+        };
+        match Self::resolve(raw) {
+            Ok(v) if v.trim().is_empty() => format!("[{src}] -> EMPTY/unresolved"),
+            Ok(v) => format!("[{src}] -> ok ({} chars)", v.chars().count()),
+            Err(e) => format!("[{src}] -> ERROR: {e}"),
+        }
+    }
+
     pub fn resolve(raw: &str) -> Result<String> {
         if let Some(var) = raw.strip_prefix("env:") {
             std::env::var(var)

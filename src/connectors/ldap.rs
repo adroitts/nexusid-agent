@@ -194,6 +194,55 @@ impl LdapConnector {
         Ok(SearchEntry::construct(entry).dn)
     }
 
+    /// Confirm the bind + base DN are usable — backs the broker's agent-routed Test Connection.
+    /// (We're already bound by the time this runs, so this verifies the base DN is readable too.)
+    pub async fn test_base(&mut self) -> Result<usize> {
+        let (entries, _res) = self
+            .ldap
+            .search(&self.base_dn, Scope::Base, "(objectClass=*)", vec!["distinguishedName"])
+            .await
+            .map_err(|e| AgentError::Ldap(format!("search base {}: {e}", self.base_dn)))?
+            .success()
+            .map_err(|e| AgentError::Ldap(format!("base search rejected: {e}")))?;
+        Ok(entries.len())
+    }
+
+    /// Agent-routed inbound sync: search the directory for users and return each entry's attributes as a
+    /// map (first value per attribute). Single search (AD caps ~1000 per query) — paging is a follow-up.
+    pub async fn search_users(
+        &mut self,
+        base_dn: &str,
+        filter: &str,
+    ) -> Result<Vec<std::collections::BTreeMap<String, String>>> {
+        let attrs = vec![
+            "mail", "userPrincipalName", "sAMAccountName", "employeeID",
+            "givenName", "sn", "displayName", "department", "title", "telephoneNumber",
+        ];
+        let (entries, _res) = self
+            .ldap
+            .search(base_dn, Scope::Subtree, filter, attrs)
+            .await
+            .map_err(|e| AgentError::Ldap(format!("search users {base_dn}: {e}")))?
+            .success()
+            .map_err(|e| AgentError::Ldap(format!("user search rejected: {e}")))?;
+        let mut out = Vec::with_capacity(entries.len());
+        for e in entries {
+            let se = SearchEntry::construct(e);
+            let mut m = std::collections::BTreeMap::new();
+            for (k, vals) in se.attrs {
+                if let Some(v) = vals.into_iter().next() {
+                    if !v.is_empty() {
+                        m.insert(k, v);
+                    }
+                }
+            }
+            if !m.is_empty() {
+                out.push(m);
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn unbind(mut self) {
         let _ = self.ldap.unbind().await;
     }
