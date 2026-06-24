@@ -4,9 +4,17 @@ Windows binaries are Authenticode-signed with **Azure Trusted Signing** (account
 then published to GitHub Releases and consumable via **irm**, **Chocolatey**, and **Winget** for
 **x64 and x86**. Linux/macOS ship as signed-by-checksum tarballs.
 
-Signing runs on the Windows agent inside `azure-pipelines-agent.yml` — it cannot be done from a
-non-Windows machine, and Azure Trusted Signing issues short-lived certs from the service (there is
-no cert file you hold).
+> **Where signing actually runs (current):** the release is **GitHub Actions**
+> (`.github/workflows/release.yml`), triggered by a `v*` tag — *not* the Azure DevOps pipeline the
+> sections below describe. Its two `azure/trusted-signing-action@v0` steps sign the `.exe` and `.msi`
+> with **`nexus-signer` / `Signer`** (East US, `https://eus.codesigning.azure.net/`), authenticated by
+> the **`AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_CREDENTIALS`** repo
+> secrets — the **NexusID-tenant** SP (app `475384de`, tenant `166d7ecb-…`) that holds the *Artifact
+> Signing Certificate Profile Signer* role on `nexus-signer`. macOS uses the `APPLE_*` / `AC_*` secrets.
+> The Azure DevOps sections (§2, `azure-pipelines-agent.yml`, service connections) are **historical**.
+> Cybrium remains a documented fallback, but its SP is in a different tenant.
+
+Azure Trusted Signing issues short-lived certs from the service (there is no cert file you hold).
 
 ---
 
