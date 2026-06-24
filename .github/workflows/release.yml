@@ -1,8 +1,8 @@
 name: release
 
-# Cross-platform build + Azure Trusted Signing (Cybrium) + GitHub Release.
+# Cross-platform build + Azure Trusted Signing (nexus-signer) + GitHub Release.
 # Trigger: push a tag like v0.1.0. Requires repo secrets AZURE_TENANT_ID / AZURE_CLIENT_ID /
-# AZURE_CLIENT_SECRET (the cybrium-agent-signer SP with the Artifact Signing signer role).
+# AZURE_CLIENT_SECRET (the NexusID SP (app 475384de) with the Artifact Signing signer role).
 on:
   push:
     tags: ['v*']
@@ -99,14 +99,14 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Authenticode-sign the Windows .exe with Azure Trusted Signing (Cybrium) before zipping.
+      # Authenticode-sign the Windows .exe with Azure Trusted Signing (nexus-signer) before zipping.
       - name: Azure Trusted Signing
         if: runner.os == 'Windows'
         uses: azure/trusted-signing-action@v0
         with:
-          endpoint: https://cus.codesigning.azure.net/
-          trusted-signing-account-name: cybrium-signing
-          certificate-profile-name: cybrium
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: nexus-signer
+          certificate-profile-name: Signer
           files-folder: target/${{ matrix.target }}/release
           files-folder-filter: exe
           file-digest: SHA256
@@ -131,9 +131,9 @@ jobs:
         if: matrix.asset == 'windows-x86_64'
         uses: azure/trusted-signing-action@v0
         with:
-          endpoint: https://cus.codesigning.azure.net/
-          trusted-signing-account-name: cybrium-signing
-          certificate-profile-name: cybrium
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: nexus-signer
+          certificate-profile-name: Signer
           files-folder: ${{ github.workspace }}
           files-folder-filter: msi
           file-digest: SHA256
