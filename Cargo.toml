@@ -1,6 +1,6 @@
 [package]
 name = "nexus-agent"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["NexusID <support@nexusid.ai>"]
 edition = "2021"
 rust-version = "1.78"

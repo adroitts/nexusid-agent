@@ -33,7 +33,14 @@ pub async fn run(config: Config) -> Result<()> {
 
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let version = env!("CARGO_PKG_VERSION");
-    let directory_id = config.ad.as_ref().and_then(|_| directory_id_from());
+    let directory_id = config.ad.as_ref().and_then(|_| {
+        config
+            .agent
+            .directory_integration_id
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(directory_id_from)
+    });
 
     audit.run_start(config.agent.mode.as_str())?;
     tracing::info!(
@@ -169,8 +176,8 @@ async fn run_db(
     ))
 }
 
-/// Optional directory-integration id this agent serves (so the broker reflects ONLINE on that
-/// integration too). Supplied via env; a future config field can carry it.
+/// Env fallback for the directory-integration id when `[agent].directory_integration_id` is unset
+/// (so the broker reflects ONLINE on that integration too).
 fn directory_id_from() -> Option<String> {
     std::env::var("NEXUS_AGENT_DIRECTORY_ID").ok().filter(|s| !s.is_empty())
 }

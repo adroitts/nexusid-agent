@@ -39,6 +39,11 @@ pub struct AgentSection {
     pub poll_interval_secs: u64,
     #[serde(default = "default_audit_path")]
     pub audit_log: String,
+    /// Directory-integration id this agent serves. Sent on each heartbeat so the broker links the
+    /// agent to its connector (shows ONLINE on that row). Falls back to the NEXUS_AGENT_DIRECTORY_ID
+    /// env var when absent. Optional — claiming ops works regardless of this.
+    #[serde(default)]
+    pub directory_integration_id: Option<String>,
 }
 
 fn default_poll() -> u64 {
