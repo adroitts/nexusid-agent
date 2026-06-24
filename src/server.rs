@@ -32,6 +32,10 @@ pub struct Operation {
     pub directory_integration_id: Option<String>,
     #[serde(rename = "targetBaseDn")]
     pub target_base_dn: Option<String>,
+    /// Forest routing/connection bundle (AgentForestContext JSON); present when the connector has
+    /// forests. The agent binds to the forest's DC for this op instead of its default directory.
+    #[serde(rename = "forestContextJson")]
+    pub forest_context_json: Option<String>,
 }
 
 #[derive(Deserialize)]

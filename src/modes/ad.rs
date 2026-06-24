@@ -5,11 +5,11 @@
 
 use crate::audit::{AuditLog, SyncCounters};
 use crate::config::AdSection;
-use crate::connectors::ldap::LdapConnector;
+use crate::connectors::ldap::{ForestContext, LdapConnector};
 use crate::crypto::Cipher;
 use crate::error::Result;
 use crate::server::{Operation, ServerClient};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct AdMode<'a> {
     pub server: &'a ServerClient,
@@ -41,11 +41,15 @@ impl AdMode<'_> {
         )
         .await?;
 
+        // Per-forest connections, built lazily and reused across ops in this pass. Ops carrying a
+        // forest context bind to that forest's DC instead of the default directory above.
+        let mut forest_conns: HashMap<String, LdapConnector> = HashMap::new();
+
         let ops = self.server.poll_operations(self.batch).await?;
         let mut counters = SyncCounters::default();
 
         for op in &ops {
-            match self.process(op, &mut ldap).await {
+            match self.route_and_process(op, &mut ldap, &mut forest_conns).await {
                 Ok(detail) => {
                     counters.record_ok(&op.op_type);
                     self.server
@@ -70,7 +74,40 @@ impl AdMode<'_> {
         }
 
         ldap.unbind().await;
+        for (_, conn) in forest_conns {
+            conn.unbind().await;
+        }
         Ok(counters)
+    }
+
+    /// Route an op to the right connection: a forest DC (per its forestContextJson, cached by forest)
+    /// or the agent's default directory. A forest connect failure surfaces as this op's failure.
+    async fn route_and_process(
+        &self,
+        op: &Operation,
+        default_ldap: &mut LdapConnector,
+        forest_conns: &mut HashMap<String, LdapConnector>,
+    ) -> Result<serde_json::Value> {
+        match &op.forest_context_json {
+            Some(json) => {
+                let ctx: ForestContext = serde_json::from_str(json).map_err(|e| {
+                    crate::error::AgentError::Ldap(format!("bad forestContextJson: {e}"))
+                })?;
+                if !forest_conns.contains_key(&ctx.forest_id) {
+                    let conn = LdapConnector::connect_forest(
+                        &ctx,
+                        op.target_base_dn.as_deref(),
+                        self.cipher,
+                        self.verify_tls,
+                    )
+                    .await?;
+                    forest_conns.insert(ctx.forest_id.clone(), conn);
+                }
+                let conn = forest_conns.get_mut(&ctx.forest_id).expect("just inserted");
+                self.process(op, conn).await
+            }
+            None => self.process(op, default_ldap).await,
+        }
     }
 
     async fn process(&self, op: &Operation, ldap: &mut LdapConnector) -> Result<serde_json::Value> {

@@ -6,12 +6,51 @@
 //! (`unicodePwd`, UTF-16LE, over LDAPS). Accounts are created disabled (`userAccountControl=514`)
 //! and enabled (`512`) on the start date, matching the broker's lifecycle.
 
+use crate::crypto::Cipher;
 use crate::error::{AgentError, Result};
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Mod, Scope, SearchEntry};
+use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
 const UAC_ENABLED: &str = "512"; // NORMAL_ACCOUNT
 const UAC_DISABLED: &str = "514"; // NORMAL_ACCOUNT | ACCOUNTDISABLE
+
+/// Forest routing/connection bundle the broker stamps on a queued op (AgentForestContext). The agent
+/// binds to the forest's DC per these fields. See `docs/agent-forest-contract.md`.
+#[derive(Debug, Deserialize)]
+pub struct ForestContext {
+    #[serde(rename = "forestId")]
+    pub forest_id: String,
+    #[serde(rename = "rootDn")]
+    pub root_dn: String,
+    #[serde(rename = "globalCatalogHost")]
+    pub global_catalog_host: Option<String>,
+    #[serde(default)]
+    pub servers: Vec<String>,
+    #[serde(rename = "authType")]
+    pub auth_type: String, // SIMPLE | SASL_KERBEROS
+    #[serde(rename = "useGmsa")]
+    pub use_gmsa: bool,
+    #[serde(rename = "serviceAccount")]
+    pub service_account: Option<String>,
+    #[serde(rename = "serviceAccountPasswordEncrypted")]
+    pub service_account_password_encrypted: Option<String>,
+    #[serde(rename = "useTls")]
+    pub use_tls: bool,
+    #[serde(rename = "resourceForest", default)]
+    pub resource_forest: bool,
+}
+
+impl ForestContext {
+    /// DC hosts to try (failover): the servers list, else the single Global Catalog host.
+    fn hosts(&self) -> Vec<String> {
+        if !self.servers.is_empty() {
+            self.servers.clone()
+        } else {
+            self.global_catalog_host.clone().into_iter().collect()
+        }
+    }
+}
 
 pub struct LdapConnector {
     ldap: Ldap,
@@ -51,6 +90,89 @@ impl LdapConnector {
             base_dn: base_dn.to_string(),
             password_writeback,
         })
+    }
+
+    /// Connect + bind to a forest's domain controller for one op, per the broker's [ForestContext].
+    /// Writes go to the DC (LDAPS 636 / LDAP 389), trying each server in order for failover. Binds:
+    /// gMSA / Strong(SASL) → GSSAPI as the agent's own Kerberos identity; SIMPLE → the forest service
+    /// account + its decrypted password. The search base is the op's target base DN (else the root DN).
+    pub async fn connect_forest(
+        ctx: &ForestContext,
+        op_target_base_dn: Option<&str>,
+        cipher: &Cipher,
+        verify_tls: bool,
+    ) -> Result<Self> {
+        let hosts = ctx.hosts();
+        if hosts.is_empty() {
+            return Err(AgentError::Ldap(format!("forest '{}' has no servers", ctx.root_dn)));
+        }
+        let kerberos = ctx.use_gmsa || ctx.auth_type.eq_ignore_ascii_case("SASL_KERBEROS");
+        let (scheme, port) = if ctx.use_tls { ("ldaps", 636) } else { ("ldap", 389) };
+        let base_dn = op_target_base_dn
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&ctx.root_dn)
+            .to_string();
+        // unicodePwd writeback needs a confidential channel: LDAPS or a Kerberos-sealed connection.
+        let password_writeback = ctx.use_tls || kerberos;
+
+        let mut last_err: Option<AgentError> = None;
+        for host in &hosts {
+            let url = format!("{scheme}://{host}:{port}");
+            let settings = LdapConnSettings::new().set_no_tls_verify(!verify_tls);
+            let bound = async {
+                let (conn, mut ldap) = LdapConnAsync::with_settings(settings, &url)
+                    .await
+                    .map_err(|e| AgentError::Ldap(format!("connect {url}: {e}")))?;
+                ldap3::drive!(conn);
+                if kerberos {
+                    Self::kerberos_bind(&mut ldap, &url).await?;
+                } else {
+                    let principal = ctx.service_account.as_deref().ok_or_else(|| {
+                        AgentError::Ldap("forest SIMPLE bind requires a service account".into())
+                    })?;
+                    let pw = match &ctx.service_account_password_encrypted {
+                        Some(enc) => cipher.decrypt_serialized(enc)?,
+                        None => {
+                            return Err(AgentError::Ldap(
+                                "forest SIMPLE bind requires a service-account password".into(),
+                            ))
+                        }
+                    };
+                    ldap.simple_bind(principal, &pw)
+                        .await
+                        .map_err(|e| AgentError::Ldap(format!("forest bind: {e}")))?
+                        .success()
+                        .map_err(|e| AgentError::Ldap(format!("forest bind rejected: {e}")))?;
+                }
+                Ok::<Ldap, AgentError>(ldap)
+            }
+            .await;
+            match bound {
+                Ok(ldap) => {
+                    tracing::info!(
+                        "forest '{}' bound via {} ({}{})",
+                        ctx.root_dn,
+                        host,
+                        if ctx.use_gmsa { "gMSA/" } else { "" },
+                        ctx.auth_type,
+                    );
+                    if ctx.resource_forest {
+                        // Linked-mailbox (msExchMasterAccountSid) is applied broker-side for Direct;
+                        // the agent path doesn't set it yet — flag so it's visible in the agent log.
+                        tracing::warn!(
+                            "forest '{}' is a resource forest — linked-mailbox SID not set by the agent",
+                            ctx.root_dn
+                        );
+                    }
+                    return Ok(Self { ldap, base_dn, password_writeback });
+                }
+                Err(e) => {
+                    tracing::warn!("forest '{}' server {} failed: {}", ctx.root_dn, host, e);
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| AgentError::Ldap(format!("forest '{}' unreachable", ctx.root_dn))))
     }
 
     #[cfg(feature = "kerberos")]
